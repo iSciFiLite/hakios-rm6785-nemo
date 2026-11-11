@@ -48,12 +48,12 @@ STATIC EFI_MEMORY_REGION_DESCRIPTOR mMemoryMap[] = {
   MMIO_REGION ("UFS PHY",           0x11FA0000ULL, 0x0000C000ULL),
 };
 
-UINTN
-EFIAPI
+VOID
 GetMemoryMap (
-  OUT EFI_MEMORY_REGION_DESCRIPTOR **MemoryMap
+  OUT EFI_MEMORY_REGION_DESCRIPTOR **MemoryDescriptor,
+  OUT UINT8                         *MemoryDescriptorCount
   )
 {
-  *MemoryMap = mMemoryMap;
-  return sizeof (mMemoryMap) / sizeof (mMemoryMap[0]);
+  *MemoryDescriptor = mMemoryMap;
+  *MemoryDescriptorCount = (UINT8)ARRAY_SIZE (mMemoryMap);
 }
