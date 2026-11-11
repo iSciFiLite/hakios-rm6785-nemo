@@ -5,6 +5,8 @@ __pycache__/
 /release-output/
 /xnu-output/
 /build-logs/
+/hakios-uefi/
+/mu/
 .DS_Store
 *.swp
 *.bak
