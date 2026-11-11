@@ -1,10 +1,10 @@
 __pycache__/
 *.py[cod]
 *$py.class
-input/
-release-output/
-xnu-output/
-build-logs/
+/input/
+/release-output/
+/xnu-output/
+/build-logs/
 .DS_Store
 *.swp
 *.bak
