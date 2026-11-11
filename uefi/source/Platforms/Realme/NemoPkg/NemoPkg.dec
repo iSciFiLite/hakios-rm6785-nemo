@@ -1,0 +1,18 @@
+## @file
+# Nemo / Realme 6 RMX2001 platform package.
+# SPDX-License-Identifier: BSD-2-Clause-Patent
+##
+[Defines]
+  DEC_SPECIFICATION              = 0x00010005
+  PACKAGE_NAME                   = NemoPkg
+  PACKAGE_GUID                   = 8E51B2A3-6A42-4D39-9B2F-3D8BB6E5F849
+  PACKAGE_VERSION                = 0.1
+
+[Guids]
+  gNemoPkgTokenSpaceGuid = { 0xC7D836AF, 0x9684, 0x498D, { 0xA0, 0x78, 0xCF, 0xFB, 0x11, 0x5E, 0x31, 0xB2 } }
+
+[PcdsFixedAtBuild]
+  gNemoPkgTokenSpaceGuid.PcdFrameBufferPixelsPerScanLine|1088|UINT32|0x00000001
+  # Live hardware DT (atag,videolfb) confirmed physical base and allocation for RMX2001
+  gNemoPkgTokenSpaceGuid.PcdFrameBufferBase|0x79D20000|UINT64|0x00000002
+  gNemoPkgTokenSpaceGuid.PcdFrameBufferSize|0x022E0000|UINT32|0x00000003

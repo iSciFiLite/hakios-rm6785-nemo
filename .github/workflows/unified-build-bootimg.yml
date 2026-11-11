@@ -1,0 +1,247 @@
+name: Build and Release Unified NEMO HakiOS
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Release tag name (e.g. v1.0.0-nemo-unified)'
+        required: false
+        default: 'v1.0.0-nemo-unified'
+      publish_release:
+        description: 'Publish GitHub Release'
+        type: boolean
+        default: true
+      build_uefi_from_source:
+        description: 'Build Mu-Silicium UEFI from source (default: true)'
+        type: boolean
+        default: true
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - name: Checkout Unified Repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Linux XNU dependencies and pinned Theos toolchain
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes autoconf automake bison build-essential clang curl device-tree-compiler flex gcc-aarch64-linux-gnu git libtinfo6 lld m4 make perl python3 uuid-dev xz-utils
+          mkdir -p "$HOME/theos/toolchain"
+          curl --fail --location --retry 3 \
+            'https://github.com/L1ghtmann/llvm-project/releases/download/test-210562a/iOSToolchain-x86_64.tar.xz' \
+            --output "$RUNNER_TEMP/iOSToolchain-x86_64.tar.xz"
+          echo 'a72a7a577e2fbe2838b6b5e9c72034fa7d114af96f0e1d4b016f18730ce4056e  '"$RUNNER_TEMP/iOSToolchain-x86_64.tar.xz" | sha256sum --check -
+          tar -xJf "$RUNNER_TEMP/iOSToolchain-x86_64.tar.xz" -C "$HOME/theos/toolchain"
+          if [ ! -d "$HOME/theos/sdks/iPhoneOS16.5.sdk" ]; then
+            git init "$HOME/theos/sdks-git"
+            git -C "$HOME/theos/sdks-git" remote add origin https://github.com/theos/sdks.git
+            git -C "$HOME/theos/sdks-git" sparse-checkout init --cone
+            git -C "$HOME/theos/sdks-git" sparse-checkout set iPhoneOS16.5.sdk
+            git -C "$HOME/theos/sdks-git" fetch --depth 1 origin 0222fd5413cf4b9af096f37b4621afa2688572f7
+            git -C "$HOME/theos/sdks-git" checkout --detach FETCH_HEAD
+            mkdir -p "$HOME/theos/sdks"
+            ln -s ../sdks-git/iPhoneOS16.5.sdk "$HOME/theos/sdks/iPhoneOS16.5.sdk"
+          fi
+
+      - name: Obtain NEMO UEFI FD and BootShim
+        env:
+          BUILD_FROM_SOURCE: ${{ github.event.inputs.build_uefi_from_source || 'true' }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p input/uefi
+          if [ "$BUILD_FROM_SOURCE" = "true" ]; then
+            echo "Building Mu-Silicium UEFI from source for NEMO..."
+            git clone --depth 1 --branch 687fa6c6a5a70f43184de92980e0a76eea5f2c4b https://github.com/oosexgang/hakios-uefi "$RUNNER_TEMP/hakios-uefi"
+            git clone --depth 1 --recurse-submodules --branch e51cd877e31c8fbb322032dc4cb6715e83d25ad3 https://github.com/Project-Silicium/Mu-Silicium "$RUNNER_TEMP/mu"
+            bash uefi/tools/prepare-hakios-mu.sh "$RUNNER_TEMP/hakios-uefi" "$RUNNER_TEMP/mu"
+            (cd "$RUNNER_TEMP/mu" && ./setup_env.sh -p apt)
+            (cd "$RUNNER_TEMP/mu" && python3 build_uefi.py -d Nemo -r DEBUG -c)
+            make -C "$RUNNER_TEMP/mu/BootShim" \
+              REQUIRES_KERNEL_HEADER=1 \
+              FD_BASE=0x40000000 \
+              FD_SIZE=0x00400000 \
+              'CFLAGS=--target=aarch64-linux-gnu -DPAYLOAD_BASE=0xF0000000'
+            fd="$(find "$RUNNER_TEMP/mu/Build" -type f -iname 'NEMO_EFI.fd' -print -quit)"
+            test -n "$fd" || { echo "NEMO_EFI.fd not found in Mu-Silicium build tree" >&2; exit 1; }
+            cp "$fd" input/uefi/NEMO_EFI.fd
+            cp "$RUNNER_TEMP/mu/BootShim/BootShim.bin" input/uefi/NEMO_BootShim.bin
+          else
+            echo "Attempting to fetch verified NEMO UEFI FD and BootShim from release..."
+            if gh release download --repo "$GITHUB_REPOSITORY" --pattern 'NEMO_EFI*.fd' --dir input/uefi 2>/dev/null; then
+              mv input/uefi/NEMO_EFI*.fd input/uefi/NEMO_EFI.fd
+              gh release download --repo "$GITHUB_REPOSITORY" --pattern 'NEMO_BootShim*.bin' --dir input/uefi
+              mv input/uefi/NEMO_BootShim*.bin input/uefi/NEMO_BootShim.bin
+            else
+              echo "No cached release FD found; building from source..."
+              git clone --depth 1 --branch 687fa6c6a5a70f43184de92980e0a76eea5f2c4b https://github.com/oosexgang/hakios-uefi "$RUNNER_TEMP/hakios-uefi"
+              git clone --depth 1 --recurse-submodules --branch e51cd877e31c8fbb322032dc4cb6715e83d25ad3 https://github.com/Project-Silicium/Mu-Silicium "$RUNNER_TEMP/mu"
+              bash uefi/tools/prepare-hakios-mu.sh "$RUNNER_TEMP/hakios-uefi" "$RUNNER_TEMP/mu"
+              (cd "$RUNNER_TEMP/mu" && ./setup_env.sh -p apt)
+              (cd "$RUNNER_TEMP/mu" && python3 build_uefi.py -d Nemo -r DEBUG -c)
+              make -C "$RUNNER_TEMP/mu/BootShim" \
+                REQUIRES_KERNEL_HEADER=1 \
+                FD_BASE=0x40000000 \
+                FD_SIZE=0x00400000 \
+                'CFLAGS=--target=aarch64-linux-gnu -DPAYLOAD_BASE=0xF0000000'
+              fd="$(find "$RUNNER_TEMP/mu/Build" -type f -iname 'NEMO_EFI.fd' -print -quit)"
+              test -n "$fd" || { echo "NEMO_EFI.fd not found in Mu-Silicium build tree" >&2; exit 1; }
+              cp "$fd" input/uefi/NEMO_EFI.fd
+              cp "$RUNNER_TEMP/mu/BootShim/BootShim.bin" input/uefi/NEMO_BootShim.bin
+            fi
+          fi
+          test -s input/uefi/NEMO_EFI.fd
+          test -s input/uefi/NEMO_BootShim.bin
+
+      - name: Build NEMO MT6785 XNU Kernel & open hello ramdisk
+        run: |
+          set -euo pipefail
+          cd hakios
+          make DEVICE=nemo nemo_defconfig
+          xnu/apply.sh
+          xnu-deps/setup.sh --stage1
+          ln -sfn "$HOME/theos/toolchain/linux/iphone/bin/dsymutil" xnu-deps/host/bin/dsymutil
+          xnu-deps/setup.sh --stage2
+          make DEVICE=nemo JOBS=$(nproc) kernel
+          make DEVICE=nemo hello
+          PLACEHOLDER=1 xnuloader/mkidentity.sh
+          HAKIOS_PLATFORM=mt6785 xnuloader/build.sh
+          mkdir -p ../xnu-output
+          cp hakios-kernel userland/hello xnuloader/loader.efi ../xnu-output/
+          kernel_version="$(python3 tools/kernel-version.py)"
+          python3 xnuloader/mkpayload.py \
+            --kernel-version "$kernel_version" \
+            --cmdline 'cpus=8 bootcpu=7 ufs=2 ufs_root=1 touchscreen=1' \
+            -o ../xnu-output/NEMO_XNUP.bin \
+            kernel=hakios-kernel ramdisk=userland/hello
+          cat > ../xnu-output/XNU-PROVENANCE.md <<EOF
+          # NEMO MT6785 HakiOS XNU Kernel and Payload Provenance
+
+          - Repository: \`iSciFiLite/hakios-rm6785-nemo\`
+          - Commit: \`${GITHUB_SHA}\`
+          - Device: Realme 6 (RMX2001 / RM6785 / Helio G90T / MT6785)
+          - Kernel: XNU Darwin 22.5.0 (ARMv8.2-A, 8 cores, boot core 7)
+          - Active Drivers:
+            * Mali-G76 MC4 Bifrost GPU (\`hakios.mtk6785_mali.c\`, \`hakios.mtk6785_mali.cpp\`)
+            * Tianma NT36672C Touch Controller (\`hakios.nt36672c.c\`)
+            * MT6359 PWRAP & GPIO59/60 Buttons (\`hakios.mtk6785_keys.c\`)
+            * MT6359 Battery Fuel Gauge (\`hakios.mtk6785_pmic.c\`)
+            * MT6785 SoC ID & Thermal Sensors (\`hakios.mtk6785_socinfo.c\`)
+            * MT6785 CONNSYS Radio (\`hakios.mtk6785_connsys.c\`)
+            * UFSHCI 2.1 Storage (\`hakios.ufs.c\`)
+          - Ramdisk: Open raw-syscall \`hello\`
+          - Cmdline: \`cpus=8 bootcpu=7 ufs=2 ufs_root=1 touchscreen=1\`
+          EOF
+
+      - name: Download stock C.18 boot template & Android boot tools
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p input/tools
+          curl --fail --location \
+            'https://android.googlesource.com/platform/system/tools/mkbootimg/+/d2bb0af5ba6d3198a3e99529c97eda1be0b5a093/unpack_bootimg.py?format=TEXT' \
+            | base64 -d > input/tools/unpack_bootimg.py
+          echo 'a9d260978a63bd06a24b6347e7dee8a28ff96639793caea15dff6aa491316308  input/tools/unpack_bootimg.py' | sha256sum -c -
+          curl --fail --location \
+            'https://raw.githubusercontent.com/Project-Silicium/Mu-Silicium/4bd8ae83bf37de41777f19e0777db70f59383a6d/Resources/Scripts/mkbootimg.py' \
+            --output input/tools/mkbootimg.py
+          echo '55037fd1a6d6cd861add76c2083d5d4321373bf714acae3f6a40deb004c27d47  input/tools/mkbootimg.py' | sha256sum -c -
+          gh release download nemo-c18-bootimg-input \
+            --repo "$GITHUB_REPOSITORY" --pattern boot.img --dir input
+          mv input/boot.img input/stock-boot.img
+          echo 'a0c8df1041b8c652ebfae1f760ec0b0e649e94746c7b7697743919c6cebf1469  input/stock-boot.img' | sha256sum -c -
+
+      - name: Assemble Unified Fastboot Boot Image
+        run: |
+          set -euo pipefail
+          mkdir -p release-output
+          fd_sha="$(sha256sum input/uefi/NEMO_EFI.fd | awk '{print $1}')"
+          shim_sha="$(sha256sum input/uefi/NEMO_BootShim.bin | awk '{print $1}')"
+          python3 uefi/tools/pack-nemo-bootimg.py \
+            --stock-boot input/stock-boot.img \
+            --fd input/uefi/NEMO_EFI.fd \
+            --shim input/uefi/NEMO_BootShim.bin \
+            --xnup xnu-output/NEMO_XNUP.bin \
+            --fd-sha256 "$fd_sha" \
+            --shim-sha256 "$shim_sha" \
+            --unpack-bootimg input/tools/unpack_bootimg.py \
+            --mkbootimg input/tools/mkbootimg.py \
+            --out-dir release-output \
+            --source-commit "$GITHUB_SHA" \
+            --xnu-source-commit "$GITHUB_SHA" \
+            --fd-release "unified-$GITHUB_SHA" \
+            --image-name NEMO_HAKIOS_XNU_BOOT.img
+          cp xnu-output/NEMO_XNUP.bin xnu-output/hakios-kernel xnu-output/hello xnu-output/XNU-PROVENANCE.md release-output/
+          cp input/uefi/NEMO_EFI.fd input/uefi/NEMO_BootShim.bin release-output/
+          cp xnu-output/loader.efi release-output/
+          (cd release-output && sha256sum NEMO_HAKIOS_XNU_BOOT.img NEMO_XNUP.bin hakios-kernel hello loader.efi NEMO_EFI.fd NEMO_BootShim.bin > SHA256SUMS)
+          (cd release-output && sha256sum -c SHA256SUMS)
+
+      - name: Upload Complete Unified Boot Release Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: NEMO-HAKIOS-UNIFIED-BOOT-${{ github.sha }}
+          path: release-output/*
+          retention-days: 30
+
+      - name: Publish Unified Release
+        if: ${{ (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || (github.event_name == 'workflow_dispatch' && github.event.inputs.publish_release != 'false') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            tag="${GITHUB_REF#refs/tags/}"
+          elif [ -n "${{ github.event.inputs.release_tag }}" ]; then
+            tag="${{ github.event.inputs.release_tag }}"
+          else
+            tag="v1.0.0-nemo-unified-${GITHUB_RUN_ID}"
+          fi
+          cat > release-output/release-notes.md <<EOF
+          # NEMO HakiOS RM6785 Unified Release ($tag)
+
+          Unified inclusive development release for Realme 6 (RMX2001 / RM6785 / Helio G90T / MT6785).
+          Combines the NEMO Mu-Silicium UEFI firmware, AArch64 BootShim, and HakiOS XNU Darwin kernel with the complete native MT6785 driver suite.
+
+          ## Highlights
+          - **Unified Fastboot Boot Image**: \`NEMO_HAKIOS_XNU_BOOT.img\` (Android v2 header, temporary RAM boot)
+          - **XNU Kernel**: \`hakios-kernel\` with 7 native MT6785 drivers (Mali-G76 GPU, Tianma NT36672C touch, PMIC/GPIO keys, MT6359 battery/power, MT6785 CONNSYS wireless, MT6785 SoC ID/thermals, UFS 2.1 storage)
+          - **Userland Ramdisk**: \`hello\` open raw-syscall executable (free of proprietary Apple blobs)
+          - **Container**: \`NEMO_XNUP.bin\` packaged payload (\`cpus=8 bootcpu=7 ufs=2 ufs_root=1 touchscreen=1\`)
+          - **Firmware**: \`NEMO_EFI.fd\` (4 MiB) and \`NEMO_BootShim.bin\`
+          - **Source Commits**: Monorepo \`${GITHUB_SHA}\`
+
+          ## Boot Instructions
+          > [!WARNING]
+          > DO NOT FLASH TO STORAGE PARTITIONS. Use temporary RAM boot only:
+          \`\`\`bash
+          fastboot boot NEMO_HAKIOS_XNU_BOOT.img
+          \`\`\`
+          EOF
+
+          # If release already exists, upload assets to it; otherwise create it
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$tag" \
+              --repo "$GITHUB_REPOSITORY" \
+              --clobber \
+              release-output/*
+          else
+            gh release create "$tag" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "NEMO HakiOS RM6785 Unified Release $tag" \
+              --notes-file release-output/release-notes.md \
+              --target "$GITHUB_SHA" \
+              release-output/*
+          fi

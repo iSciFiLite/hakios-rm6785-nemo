@@ -1,0 +1,37 @@
+## @file
+#  MT6785 UFS Block I/O DXE stub — SALAA / RMX2151.
+#
+#  Probe-only stub for MT6785 UFSHCI (0x11270000) and M-PHY (0x11fa0000).
+#  Placeholder handles report no media; storage transfer is not implemented.
+#
+#  Copyright (c) 2024, SALAA UEFI Contributors. All rights reserved.
+#  SPDX-License-Identifier: BSD-2-Clause-Patent
+##
+
+[Defines]
+  INF_VERSION                    = 0x0001001B
+  BASE_NAME                      = MT6785UfsBlockIoDxe
+  FILE_GUID                      = 6D6E1A20-2151-4678-8567-678500000020
+  MODULE_TYPE                    = DXE_DRIVER
+  VERSION_STRING                 = 1.0
+  ENTRY_POINT                    = UfsBlockIoDxeInitialise
+
+[Sources]
+  UfsBlockIoDxe.c
+
+[Packages]
+  MdePkg/MdePkg.dec
+
+[LibraryClasses]
+  UefiDriverEntryPoint
+  UefiBootServicesTableLib
+  DebugLib
+  BaseMemoryLib
+  MemoryAllocationLib
+  IoLib
+
+[Protocols]
+  gEfiBlockIoProtocolGuid                 ## PRODUCES
+
+[Depex]
+  TRUE

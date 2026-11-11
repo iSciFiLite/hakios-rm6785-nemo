@@ -1,0 +1,20 @@
+name: SALAA UEFI source audit
+
+on:
+  push:
+    branches: [main, development]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Audit source inventory and compatibility claims
+        run: python3 tools/firmware-audit.py
+      - name: Check hosted boot-image packer syntax
+        run: python3 -m py_compile tools/pack-salaa-bootimg.py
