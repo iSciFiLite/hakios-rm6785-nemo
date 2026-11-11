@@ -33,7 +33,7 @@
 
 [LibraryClasses]
   PlatformSecLib|Silicon/MediaTek/MT6785Pkg/Library/PlatformSecLib/PlatformSecLib.inf
-  MemoryMapLib|Platforms/Realme/SalaaPkg/Library/MemoryMapLib/MemoryMapLib.inf
+  MemoryMapLib|Platforms/Realme/NemoPkg/Library/MemoryMapLib/MemoryMapLib.inf
   # MT6785 UART0 SerialPortLib — MMIO implementation at 0x11002000.
   # Compatible: mediatek,mt6577-uart (DT-confirmed, stock-salaa-1.dts).
   # Configured at 115200-8N1 using the 26 MHz SoC reference clock and

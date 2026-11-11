@@ -1,5 +1,5 @@
 ##
-# SALAA RAM and MMIO map derived from user-provided RMX2151L1 live evidence.
+# NEMO RAM and MMIO map derived from user-provided RMX2001 live evidence.
 # SPDX-License-Identifier: BSD-2-Clause-Patent
 ##
 [Defines]
